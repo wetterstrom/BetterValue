@@ -1,0 +1,507 @@
+﻿@page "/"
+@using BetterValue.Models
+@using BetterValue.Service
+@inject ICsvParserService CsvParser
+@inject ITeamStatisticsAggregator StatsAggregator
+@inject IPoissonService PoissonService
+
+<PageTitle>OddsAnalytics - ValueBetter</PageTitle>
+
+<div class="container py-4">
+    <h2 class="mb-4">📊 OddsAnalytics (Offline)</h2>
+
+    <div class="upload-zone p-4 mb-4 text-center border rounded shadow-sm bg-light" style="border: 2px dashed #0d6efd !important;">
+        <h5 class="mb-2 text-primary">Läs in historisk data (CSV)</h5>
+        <InputFile OnChange="@HandleFileSelected" accept=".csv" class="form-control w-50 mx-auto" />
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="alert alert-info">Bearbetar data och räknar ut xG...</div>
+    }
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @if (teams != null && teams.Any())
+    {
+        <ul class="nav nav-tabs mb-4">
+            <li class="nav-item">
+                <a class="nav-link @(activeTab == "overview" ? "active fw-bold" : "text-muted")" style="cursor:pointer;" @onclick='() => activeTab = "overview"'>
+                    🔍 1X2 Kalkylator
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link @(activeTab == "overunder" ? "active fw-bold text-primary" : "text-muted")" style="cursor:pointer;" @onclick='() => activeTab = "overunder"'>
+                    ⚽ Över/Under Kalkylator
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link @(activeTab == "scanner" ? "active fw-bold text-success" : "text-muted")" style="cursor:pointer;" @onclick='() => activeTab = "scanner"'>
+                    🎯 Värdespels-Skanner
+                </a>
+            </li>
+        </ul>
+
+        <!-- FLIK 1: 1X2 KALKYLATOR -->
+        @if (activeTab == "overview")
+        {
+            <div class="row">
+                <div class="col-lg-6 mb-4">
+                    <h5 class="mb-3">Senaste matcherna (Historik)</h5>
+                    <div class="table-responsive shadow-sm rounded" style="max-height: 250px; overflow-y: auto;">
+                        <table class="table table-striped table-sm align-middle mb-0">
+                            <thead class="table-dark sticky-top">
+                                <tr><th>Datum</th><th>Match</th><th>Resultat</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var match in matches.Take(50))
+                                {
+                                    <tr>
+                                        <td>@match.DateString</td>
+                                        <td class="fw-bold">@match.HomeTeam - @match.AwayTeam</td>
+                                        <td><span class="badge bg-secondary">@match.HomeGoals - @match.AwayGoals</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="col-lg-6 mb-4">
+                    <h5 class="mb-3">Lagens viktade xG (Hemma/Borta)</h5>
+                    <div class="table-responsive shadow-sm rounded" style="max-height: 250px; overflow-y: auto;">
+                        <table class="table table-striped table-sm align-middle mb-0">
+                            <thead class="table-dark sticky-top">
+                                <tr>
+                                    <th>Lag</th>
+                                    <th>Gj(H)</th>
+                                    <th>In(H)</th>
+                                    <th>Gj(B)</th>
+                                    <th>In(B)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var team in teams.OrderBy(t => t.Name))
+                                {
+                                    <tr>
+                                        <td class="fw-bold">@team.Name</td>
+                                        <td class="text-success">@team.HomeGoalsScoredAvg.ToString("0.00")</td>
+                                        <td class="text-danger">@team.HomeGoalsConcededAvg.ToString("0.00")</td>
+                                        <td class="text-success">@team.AwayGoalsScoredAvg.ToString("0.00")</td>
+                                        <td class="text-danger">@team.AwayGoalsConcededAvg.ToString("0.00")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <hr />
+            <h5 class="mb-3">Manuell Match-Kalkylator (1X2)</h5>
+            <div class="row g-2 align-items-end mb-4 bg-light p-3 rounded shadow-sm border">
+                <div class="col-md-3">
+                    <label class="form-label fw-bold small">Hemmalag</label>
+                    <select class="form-select form-select-sm" @bind="selectedHomeTeam">
+                        <option value="">-- Välj --</option>
+                        @foreach (var t in teams.OrderBy(t => t.Name))
+                        {
+                            <option value="@t.Name">@t.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold small">Bortalag</label>
+                    <select class="form-select form-select-sm" @bind="selectedAwayTeam">
+                        <option value="">-- Välj --</option>
+                        @foreach (var t in teams.OrderBy(t => t.Name))
+                        {
+                            <option value="@t.Name">@t.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label fw-bold small">Odds (1X2)</label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">1</span><input type="number" step="0.01" class="form-control" @bind="odds1" />
+                        <span class="input-group-text">X</span><input type="number" step="0.01" class="form-control" @bind="oddsX" />
+                        <span class="input-group-text">2</span><input type="number" step="0.01" class="form-control" @bind="odds2" />
+                    </div>
+                </div>
+                <div class="col-md-1">
+                    <button class="btn btn-sm btn-primary w-100 fw-bold" @onclick="CalculateMatch">Kör</button>
+                </div>
+            </div>
+
+            @if (calcResult != null)
+            {
+                <div class="row text-center mt-3">
+                    <h6 class="mb-3">Simulerat xG: <span class="text-primary">@calcResult.ExpectedHomeGoals.ToString("0.00")</span> - <span class="text-primary">@calcResult.ExpectedAwayGoals.ToString("0.00")</span></h6>
+
+                    <div class="col-md-4">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="text-muted">Hemmavinst (1)</h6><h4 class="fw-bold">@((calcResult.HomeWin * 100).ToString("0.0")) %</h4>
+                                @{
+                                    double ev1 = (calcResult.HomeWin * odds1) - 1;
+                                }
+                                @if (ev1 > 0)
+                                {
+                                    <div class="badge bg-success w-100 fs-6">+@((ev1 * 100).ToString("0.0")) % EV</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="text-muted">Oavgjort (X)</h6><h4 class="fw-bold">@((calcResult.Draw * 100).ToString("0.0")) %</h4>
+                                @{
+                                    double evX = (calcResult.Draw * oddsX) - 1;
+                                }
+                                @if (evX > 0)
+                                {
+                                    <div class="badge bg-success w-100 fs-6">+@((evX * 100).ToString("0.0")) % EV</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="text-muted">Bortavinst (2)</h6><h4 class="fw-bold">@((calcResult.AwayWin * 100).ToString("0.0")) %</h4>
+                                @{
+                                    double ev2 = (calcResult.AwayWin * odds2) - 1;
+                                }
+                                @if (ev2 > 0)
+                                {
+                                    <div class="badge bg-success w-100 fs-6">+@((ev2 * 100).ToString("0.0")) % EV</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+
+        <!-- FLIK 2: ÖVER/UNDER KALKYLATOR -->
+        @if (activeTab == "overunder")
+        {
+            <h5 class="mb-3">Manuell Match-Kalkylator (Över/Under)</h5>
+            <div class="bg-light p-4 rounded shadow-sm border mb-4">
+
+                <!-- Rad 1: Lag -->
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold small text-muted">Hemmalag</label>
+                        <select class="form-select" @bind="selectedHomeTeam">
+                            <option value="">-- Välj --</option>
+                            @foreach (var t in teams.OrderBy(t => t.Name))
+                            {
+                                <option value="@t.Name">@t.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold small text-muted">Bortalag</label>
+                        <select class="form-select" @bind="selectedAwayTeam">
+                            <option value="">-- Välj --</option>
+                            @foreach (var t in teams.OrderBy(t => t.Name))
+                            {
+                                <option value="@t.Name">@t.Name</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Rad 2: Odds och knapp -->
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-5">
+                        <label class="form-label fw-bold small text-muted">Odds (2,5 mål)</label>
+                        <div class="input-group">
+                            <span class="input-group-text fw-bold">Ö</span>
+                            <input type="number" step="0.01" class="form-control text-center" @bind="oddsO25" />
+                            <span class="input-group-text fw-bold">U</span>
+                            <input type="number" step="0.01" class="form-control text-center" @bind="oddsU25" />
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label fw-bold small text-muted">Odds (3,5 mål)</label>
+                        <div class="input-group">
+                            <span class="input-group-text fw-bold">Ö</span>
+                            <input type="number" step="0.01" class="form-control text-center" @bind="oddsO35" />
+                            <span class="input-group-text fw-bold">U</span>
+                            <input type="number" step="0.01" class="form-control text-center" @bind="oddsU35" />
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-primary w-100 fw-bold" @onclick="CalculateMatch">Kör</button>
+                    </div>
+                </div>
+            </div>
+
+            @if (calcResult != null)
+            {
+                <div class="row text-center mt-3">
+                    <h6 class="mb-3">Simulerat xG: <span class="text-primary">@calcResult.ExpectedHomeGoals.ToString("0.00")</span> - <span class="text-primary">@calcResult.ExpectedAwayGoals.ToString("0.00")</span> (Totalt: @((calcResult.ExpectedHomeGoals + calcResult.ExpectedAwayGoals).ToString("0.00")))</h6>
+
+                    <!-- Linje 2.5 -->
+                    <div class="col-md-3">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="text-muted">Över 2,5 mål</h6><h4 class="fw-bold">@((calcResult.Over25 * 100).ToString("0.0")) %</h4>
+                                @{
+                                    double evO25 = (calcResult.Over25 * oddsO25) - 1;
+                                }
+                                @if (evO25 > 0)
+                                {
+                                    <div class="badge bg-success w-100 fs-6">+@((evO25 * 100).ToString("0.0")) % EV</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="text-muted">Under 2,5 mål</h6><h4 class="fw-bold">@((calcResult.Under25 * 100).ToString("0.0")) %</h4>
+                                @{
+                                    double evU25 = (calcResult.Under25 * oddsU25) - 1;
+                                }
+                                @if (evU25 > 0)
+                                {
+                                    <div class="badge bg-success w-100 fs-6">+@((evU25 * 100).ToString("0.0")) % EV</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Linje 3.5 -->
+                    <div class="col-md-3">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="text-muted">Över 3,5 mål</h6><h4 class="fw-bold">@((calcResult.Over35 * 100).ToString("0.0")) %</h4>
+                                @{
+                                    double evO35 = (calcResult.Over35 * oddsO35) - 1;
+                                }
+                                @if (evO35 > 0)
+                                {
+                                    <div class="badge bg-success w-100 fs-6">+@((evO35 * 100).ToString("0.0")) % EV</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="text-muted">Under 3,5 mål</h6><h4 class="fw-bold">@((calcResult.Under35 * 100).ToString("0.0")) %</h4>
+                                @{
+                                    double evU35 = (calcResult.Under35 * oddsU35) - 1;
+                                }
+                                @if (evU35 > 0)
+                                {
+                                    <div class="badge bg-success w-100 fs-6">+@((evU35 * 100).ToString("0.0")) % EV</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+
+        <!-- FLIK 3: AUTOMATISK SKANNER (Bibehållen som tidigare) -->
+        @if (activeTab == "scanner")
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Skapa din matchlista för att hitta värde (1X2)</h5>
+                    <button class="btn btn-sm btn-light fw-bold text-success" @onclick="AddScannerRow">+ Lägg till match</button>
+                </div>
+                <div class="card-body bg-light">
+                    @foreach (var row in scannerRows)
+                    {
+                        <div class="row g-2 align-items-center mb-2">
+                            <div class="col-md-3">
+                                <select class="form-select form-select-sm" @bind="row.HomeTeam">
+                                    <option value="">-- Hemmalag --</option>
+                                    @foreach (var t in teams.OrderBy(t => t.Name))
+                                    {
+                                        <option value="@t.Name">@t.Name</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <select class="form-select form-select-sm" @bind="row.AwayTeam">
+                                    <option value="">-- Bortalag --</option>
+                                    @foreach (var t in teams.OrderBy(t => t.Name))
+                                    {
+                                        <option value="@t.Name">@t.Name</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text">1</span><input type="number" step="0.01" class="form-control" @bind="row.Odds1" />
+                                    <span class="input-group-text">X</span><input type="number" step="0.01" class="form-control" @bind="row.OddsX" />
+                                    <span class="input-group-text">2</span><input type="number" step="0.01" class="form-control" @bind="row.Odds2" />
+                                </div>
+                            </div>
+                            <div class="col-md-2 text-end">
+                                <button class="btn btn-sm btn-outline-danger w-100" @onclick="() => RemoveScannerRow(row)">Ta bort</button>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="text-center mt-4">
+                        <button class="btn btn-success btn-lg fw-bold px-5 shadow" @onclick="RunScanner">🔍 Skanna efter Spelvärde!</button>
+                    </div>
+                </div>
+            </div>
+
+            @if (scannedResults.Any())
+            {
+                <h4 class="mb-3 text-success">🔥 Hittade Spelvärden:</h4>
+                <div class="row">
+                    @foreach (var res in scannedResults.OrderByDescending(r => r.BestEV))
+                    {
+                        <div class="col-md-4 mb-3">
+                            <div class="card border-success shadow-sm h-100">
+                                <div class="card-header bg-success text-white fw-bold">
+                                    @res.HomeTeam - @res.AwayTeam
+                                </div>
+                                <div class="card-body text-center">
+                                    <h6 class="text-muted mb-3">Modellens spelrekommendation:</h6>
+                                    <h3 class="fw-bold text-dark mb-1">Spela på @res.BestPick</h3>
+                                    <p class="text-muted mb-3">Odds: @res.BestOdds</p>
+                                    <div class="alert alert-success m-0 p-2 fw-bold">
+                                        EV: +@((res.BestEV * 100).ToString("0.0")) %
+                                    </div>
+                                    <div class="mt-3 small text-muted">
+                                        Modellens chans: @((res.BestProb * 100).ToString("0.0"))%
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                @if (!scannedResults.Any(r => r.BestEV > 0))
+                {
+                    <div class="alert alert-warning text-center">
+                        Motorn hittade tyvärr inget spelvärde över 0% på de inmatade matcherna och oddsen.
+                    </div>
+                }
+            }
+        }
+    }
+</div>
+
+@code {
+    private string activeTab = "overview";
+    private List<FootballDataMatch> matches = new();
+    private List<Team> teams = new();
+    private bool isLoading;
+    private string? errorMessage;
+
+    // Kalkylator 1X2 & O/U Delad State
+    private string selectedHomeTeam = "";
+    private string selectedAwayTeam = "";
+    private MatchProbabilities? calcResult;
+
+    // Odds 1X2
+    private double odds1 = 2.00;
+    private double oddsX = 3.20;
+    private double odds2 = 3.50;
+
+    // Odds Över/Under
+    private double oddsO25 = 1.85;
+    private double oddsU25 = 1.85;
+    private double oddsO35 = 3.20;
+    private double oddsU35 = 1.30;
+
+    // Skanner
+    private List<ScannerRow> scannerRows = new();
+    private List<ScannerResult> scannedResults = new();
+
+    protected override void OnInitialized()
+    {
+        for (int i = 0; i < 3; i++) AddScannerRow();
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        isLoading = true;
+        errorMessage = null;
+        matches.Clear();
+        teams.Clear();
+        calcResult = null;
+        scannedResults.Clear();
+
+        try
+        {
+            if (e.File != null)
+            {
+                matches = (await CsvParser.ParseMatchesAsync(e.File)).ToList();
+                teams = StatsAggregator.CalculateTeamStatistics(matches).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Ett fel uppstod: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void CalculateMatch()
+    {
+        var home = teams.FirstOrDefault(t => t.Name == selectedHomeTeam);
+        var away = teams.FirstOrDefault(t => t.Name == selectedAwayTeam);
+        if (home != null && away != null) calcResult = PoissonService.CalculateProbabilities(home, away);
+    }
+
+    // --- SKANNER LOGIK ---
+    private void AddScannerRow() => scannerRows.Add(new ScannerRow());
+    private void RemoveScannerRow(ScannerRow row) => scannerRows.Remove(row);
+
+    private void RunScanner()
+    {
+        scannedResults.Clear();
+        foreach (var row in scannerRows)
+        {
+            if (string.IsNullOrEmpty(row.HomeTeam) || string.IsNullOrEmpty(row.AwayTeam)) continue;
+            var home = teams.FirstOrDefault(t => t.Name == row.HomeTeam);
+            var away = teams.FirstOrDefault(t => t.Name == row.AwayTeam);
+            if (home != null && away != null)
+            {
+                var probs = PoissonService.CalculateProbabilities(home, away);
+                double ev1 = (probs.HomeWin * row.Odds1) - 1;
+                double evX = (probs.Draw * row.OddsX) - 1;
+                double ev2 = (probs.AwayWin * row.Odds2) - 1;
+                double maxEv = Math.Max(ev1, Math.Max(evX, ev2));
+
+                if (maxEv > 0)
+                {
+                    string pick = maxEv == ev1 ? "Hemmavinst (1)" : (maxEv == evX ? "Oavgjort (X)" : "Bortavinst (2)");
+                    double prob = maxEv == ev1 ? probs.HomeWin : (maxEv == evX ? probs.Draw : probs.AwayWin);
+                    double odds = maxEv == ev1 ? row.Odds1 : (maxEv == evX ? row.OddsX : row.Odds2);
+                    scannedResults.Add(new ScannerResult(home.Name, away.Name, pick, maxEv, prob, odds));
+                }
+            }
+        }
+    }
+
+    private class ScannerRow
+    {
+        public string HomeTeam { get; set; } = "";
+        public string AwayTeam { get; set; } = "";
+        public double Odds1 { get; set; } = 2.00;
+        public double OddsX { get; set; } = 3.20;
+        public double Odds2 { get; set; } = 3.50;
+    }
+
+    private record ScannerResult(string HomeTeam, string AwayTeam, string BestPick, double BestEV, double BestProb, double BestOdds);
+}
