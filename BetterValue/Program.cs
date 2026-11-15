@@ -17,6 +17,11 @@ namespace BetterValue
             builder.Services.AddScoped<ICsvParserService, CsvParserService>();
             builder.Services.AddScoped<ITeamStatisticsAggregator, TeamStatisticsAggregator>();
             builder.Services.AddScoped<IPoissonService, PoissonService>();
+            builder.Services.AddScoped<IHockeyCsvParserService, HockeyCsvParserService>();
+
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            builder.Services.AddScoped<IExcelParserService, ExcelParserService>();
+            builder.Services.AddScoped<HockeyPoissonService>();
 
 
             await builder.Build().RunAsync();

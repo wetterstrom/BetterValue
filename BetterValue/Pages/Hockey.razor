@@ -1,0 +1,248 @@
+﻿@page "/hockey"
+@using BetterValue.Models
+@using BetterValue.Service
+@inject IHockeyCsvParserService HockeyCsvParser
+@inject HockeyPoissonService PoissonService
+
+<PageTitle>OddsAnalytics - Hockey</PageTitle>
+
+<div class="container py-4">
+    <h2 class="mb-4 fw-bold">🏒 Hockey-Skanner (Poisson)</h2>
+
+    <div class="upload-zone-premium p-5 mb-5 text-center">
+        <h5 class="mb-3 text-primary fw-bold">Läs in Hockey-data (MoneyPuck CSV)</h5>
+        <InputFile OnChange="@HandleFileSelected" accept=".csv" class="form-control w-50 mx-auto shadow-sm" />
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="alert alert-info shadow-sm">Beräknar xG och formkurvor för isen...</div>
+    }
+
+    @if (teams != null && teams.Any())
+    {
+        <div class="alert alert-success shadow-sm fw-bold">
+            ✅ Laddade in @teams.Count lag från databasen! Redo för kalkyl.
+        </div>
+
+        <!-- ENKLA KALKYLATORN -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <label class="form-label fw-bold">Hemmalag:</label>
+                <select class="form-select shadow-sm" @bind="selectedHomeTeam">
+                    <option value="">-- Välj hemmalag --</option>
+                    @foreach (var t in teams.OrderBy(x => x.team))
+                    {
+                        <option value="@t.team">@t.team</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-bold">Bortalag:</label>
+                <select class="form-select shadow-sm" @bind="selectedAwayTeam">
+                    <option value="">-- Välj bortalag --</option>
+                    @foreach (var t in teams.OrderBy(x => x.team))
+                    {
+                        <option value="@t.team">@t.team</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        <button class="btn-premium-blue w-100 fw-bold py-2 mb-4" @onclick="CalculateMatch">Kör Poisson-analys</button>
+
+        @if (calcResult != null)
+        {
+            <div class="row mt-2">
+                <div class="col-md-6 mb-3">
+                    <div class="premium-card">
+                        <div class="premium-card-header-blue fw-bold fs-5">Moneyline (Inkl. OT)</div>
+                        <div class="card-body text-center p-4">
+                            <h5 class="mb-3 fw-bold">@selectedHomeTeam vs @selectedAwayTeam</h5>
+                            <p class="fs-5">1: <strong>@((calcResult.HomeMoneyline * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.HomeMoneyline).ToString("F2")))</p>
+                            <p class="fs-5">2: <strong>@((calcResult.AwayMoneyline * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.AwayMoneyline).ToString("F2")))</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <div class="premium-card">
+                        <div class="premium-card-header-green fw-bold fs-5">Målmarknad (Ö/U 5.5)</div>
+                        <div class="card-body text-center p-4">
+                            <h5 class="mb-3 fw-bold">Standardlinje</h5>
+                            <p class="fs-5">Över 5.5: <strong>@((calcResult.Over55 * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.Over55).ToString("F2")))</p>
+                            <p class="fs-5">Under 5.5: <strong>@((calcResult.Under55 * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.Under55).ToString("F2")))</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- MULTI-SKANNERN -->
+        <hr class="my-5" />
+        <h3 class="mb-4 text-success fw-bold">🎯 Värdespels-Skanner (NHL)</h3>
+
+        <div class="premium-table-container mb-4">
+            <table class="table table-hover premium-table mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>Hemmalag</th>
+                        <th>Bortalag</th>
+                        <th>Odds 1 (ML)</th>
+                        <th>Odds 2 (ML)</th>
+                        <th>Odds Ö 5.5</th>
+                        <th>Odds U 5.5</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in scannerRows)
+                    {
+                        <tr>
+                            <td>
+                                <select class="form-select form-select-sm shadow-sm" @bind="row.HomeTeam">
+                                    <option value="">Välj...</option>
+                                    @foreach (var t in teams.OrderBy(x => x.team))
+                                    {
+                                        <option value="@t.team">@t.team</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                <select class="form-select form-select-sm shadow-sm" @bind="row.AwayTeam">
+                                    <option value="">Välj...</option>
+                                    @foreach (var t in teams.OrderBy(x => x.team))
+                                    {
+                                        <option value="@t.team">@t.team</option>
+                                    }
+                                </select>
+                            </td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.Odds1" /></td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.Odds2" /></td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.OddsO55" /></td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.OddsU55" /></td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger fw-bold shadow-sm" @onclick="() => RemoveScannerRow(row)">X</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="d-flex gap-2 mb-5">
+            <button class="btn btn-secondary shadow-sm" @onclick="AddScannerRow">+ Lägg till match</button>
+            <button class="btn-premium-success fw-bold px-4 py-2" @onclick="RunScanner">Skanna efter Värdespel</button>
+        </div>
+
+        @if (scannedResults.Any())
+        {
+            <h4 class="mb-3 fw-bold">✅ Hittade Värdespel (+EV)</h4>
+            <div class="premium-table-container">
+                <table class="table table-hover premium-table mb-0">
+                    <thead class="bg-success text-white">
+                        <tr>
+                            <th>Match</th>
+                            <th>Speltips</th>
+                            <th>Din Chans</th>
+                            <th>Spelbolagets Odds</th>
+                            <th>Edge (+EV)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var res in scannedResults)
+                        {
+                            <tr>
+                                <td class="fw-bold">@res.Match</td>
+                                <td><span class="badge bg-primary fs-6 shadow-sm">@res.Pick</span></td>
+                                <td>@((res.Prob * 100).ToString("F1"))%</td>
+                                <td>@res.Odds.ToString("F2")</td>
+                                <td><span class="ev-badge">+@((res.EV * 100).ToString("F1"))%</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+@code {
+
+   
+    private bool isLoading;
+    private List<HockeyDataMatch> teams = new();
+
+    private string selectedHomeTeam = "";
+    private string selectedAwayTeam = "";
+    private HockeyMatchProbabilities? calcResult;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        isLoading = true;
+        try
+        {
+            var file = e.File;
+            if (file != null) teams = (await HockeyCsvParser.ParseTeamsAsync(file)).ToList();
+        }
+        finally { isLoading = false; }
+    }
+
+    private void CalculateMatch()
+    {
+        var home = teams.FirstOrDefault(t => t.team == selectedHomeTeam);
+        var away = teams.FirstOrDefault(t => t.team == selectedAwayTeam);
+        if (home != null && away != null) calcResult = PoissonService.CalculateProbabilities(home, away);
+    }
+
+    private List<HockeyScannerRow> scannerRows = new();
+    private List<HockeyScannerResult> scannedResults = new();
+
+    protected override void OnInitialized()
+    {
+        for (int i = 0; i < 3; i++) AddScannerRow();
+    }
+
+    private void AddScannerRow() => scannerRows.Add(new HockeyScannerRow());
+    private void RemoveScannerRow(HockeyScannerRow row) => scannerRows.Remove(row);
+
+    private void RunScanner()
+    {
+        scannedResults.Clear();
+        foreach (var row in scannerRows)
+        {
+            if (string.IsNullOrEmpty(row.HomeTeam) || string.IsNullOrEmpty(row.AwayTeam)) continue;
+
+            var home = teams.FirstOrDefault(t => t.team == row.HomeTeam);
+            var away = teams.FirstOrDefault(t => t.team == row.AwayTeam);
+
+            if (home != null && away != null)
+            {
+                var probs = PoissonService.CalculateProbabilities(home, away);
+                string matchName = $"{home.team} - {away.team}";
+
+                double ev1 = (probs.HomeMoneyline * row.Odds1) - 1;
+                double ev2 = (probs.AwayMoneyline * row.Odds2) - 1;
+                double evO = (probs.Over55 * row.OddsO55) - 1;
+                double evU = (probs.Under55 * row.OddsU55) - 1;
+
+                if (ev1 > 0) scannedResults.Add(new HockeyScannerResult(matchName, "1 (ML)", ev1, probs.HomeMoneyline, row.Odds1));
+                if (ev2 > 0) scannedResults.Add(new HockeyScannerResult(matchName, "2 (ML)", ev2, probs.AwayMoneyline, row.Odds2));
+                if (evO > 0) scannedResults.Add(new HockeyScannerResult(matchName, "Över 5.5", evO, probs.Over55, row.OddsO55));
+                if (evU > 0) scannedResults.Add(new HockeyScannerResult(matchName, "Under 5.5", evU, probs.Under55, row.OddsU55));
+            }
+        }
+        scannedResults = scannedResults.OrderByDescending(r => r.EV).ToList();
+    }
+
+    private class HockeyScannerRow
+    {
+        public string HomeTeam { get; set; } = "";
+        public string AwayTeam { get; set; } = "";
+        public double Odds1 { get; set; } = 2.00;
+        public double Odds2 { get; set; } = 2.00;
+        public double OddsO55 { get; set; } = 1.90;
+        public double OddsU55 { get; set; } = 1.90;
+    }
+
+    private record HockeyScannerResult(string Match, string Pick, double EV, double Prob, double Odds);
+}
