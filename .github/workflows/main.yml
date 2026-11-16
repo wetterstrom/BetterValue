@@ -26,8 +26,8 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Publish app
-        run: dotnet publish -c Release --output release/wwwroot
-
+        run: dotnet publish BetterValue.csproj -c Release --output release/wwwroot
+    
       - name: Add .nojekyll file
         run: touch release/wwwroot/.nojekyll
 
