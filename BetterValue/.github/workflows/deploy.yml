@@ -2,7 +2,7 @@
 
 on:
   push:
-    branches: ["master"] 
+    branches: ["master"] #detta är en master
 
 permissions:
   contents: read
