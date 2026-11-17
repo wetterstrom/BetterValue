@@ -27,7 +27,10 @@ jobs:
 
       - name: Publish app
         run: dotnet publish BetterValue/BetterValue.csproj -c Release --output release
-    
+
+      - name: Rewrite base href for GitHub Pages
+        run: sed -i 's/<base href="\/"/<base href="\/BetterValue\/"/g' release/wwwroot/index.html
+
       - name: Add .nojekyll file
         run: touch release/wwwroot/.nojekyll
 
