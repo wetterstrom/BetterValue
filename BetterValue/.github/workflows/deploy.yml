@@ -24,20 +24,14 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x' 
-
       - name: Publish app
-        run: dotnet publish -c Release --output release/wwwroot
+        run: dotnet publish BetterValue/BetterValue.csproj -c Release --output release
 
-      - name: Add .nojekyll file to bypass Jekyll processing
+      - name: Rewrite base href for GitHub Pages
+        run: sed -i 's/<base href="\/"/<base href="\/BetterValue\/"/g' release/wwwroot/index.html
+
+      - name: Add .nojekyll file
         run: touch release/wwwroot/.nojekyll
-
-      - name: Copy index.html to 404.html for client-side routing
-        run: cp release/wwwroot/index.html release/wwwroot/404.html
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'release/wwwroot'
 
   deploy:
     environment:
