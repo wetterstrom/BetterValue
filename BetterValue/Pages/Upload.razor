@@ -28,7 +28,7 @@
 
     @if (teams != null && teams.Any())
     {
-        <!-- DENNA DEL SAKNADES: LIGA-VÄLJARE -->
+        <!-- LIGA-VÄLJARE -->
         @if (availableLeagues.Any())
         {
             <div class="d-flex align-items-center justify-content-between mb-4 bg-white p-3 rounded shadow-sm border border-primary">
@@ -46,6 +46,28 @@
                 </div>
             </div>
         }
+
+        <!-- FLIKMENY FÖR ATT BYTA VY -->
+        <ul class="nav nav-pills mb-4">
+            <li class="nav-item">
+                <button class="nav-link @(activeTab == "overview" ? "active fw-bold shadow-sm" : "")"
+                        @onclick="@(() => activeTab = "overview")">
+                    📊 1X2 & Historik
+                </button>
+            </li>
+            <li class="nav-item ms-2">
+                <button class="nav-link @(activeTab == "overunder" ? "active fw-bold shadow-sm" : "")"
+                        @onclick="@(() => activeTab = "overunder")">
+                    ⚽ Över/Under 2,5 & 3,5
+                </button>
+            </li>
+            <li class="nav-item ms-2">
+                <button class="nav-link @(activeTab == "scanner" ? "active fw-bold shadow-sm" : "")"
+                        @onclick="@(() => activeTab = "scanner")">
+                    🔍 Kupong-skanner
+                </button>
+            </li>
+        </ul>
 
         <!-- FLIK 1: 1X2 KALKYLATOR -->
         @if (activeTab == "overview")
