@@ -11,76 +11,93 @@ public class TeamStatisticsAggregator : ITeamStatisticsAggregator
 {
     public IReadOnlyList<Team> CalculateTeamStatistics(IReadOnlyList<FootballDataMatch> matches)
     {
-        // 1. Samla alla matcher per lag i kronologisk ordning
-        var teamMatches = new Dictionary<string, List<TeamMatchData>>();
+        if (matches == null || !matches.Any())
+            return new List<Team>();
 
-        foreach (var match in matches)
+        // 1. Räkna ut ligans faktiska snitt för konvertering av skott på mål
+        var matchesWithShots = matches.Where(m => m.HomeShotsOnTarget.HasValue && m.AwayShotsOnTarget.HasValue).ToList();
+        double totalShots = matchesWithShots.Sum(m => m.HomeShotsOnTarget!.Value + m.AwayShotsOnTarget!.Value);
+        double totalGoalsInShotMatches = matchesWithShots.Sum(m => m.HomeGoals + m.AwayGoals);
+        double goalsPerShot = totalShots > 0 ? totalGoalsInShotMatches / totalShots : 0.30;
+
+        // Hjälpfunktion: Blandar 50% mål och 50% skott på mål (om skottdata finns)
+        double GetEffectiveGoals(int goals, int? shotsOnTarget)
         {
-            if (!teamMatches.ContainsKey(match.HomeTeam)) teamMatches[match.HomeTeam] = new List<TeamMatchData>();
-            if (!teamMatches.ContainsKey(match.AwayTeam)) teamMatches[match.AwayTeam] = new List<TeamMatchData>();
-
-            teamMatches[match.HomeTeam].Add(new TeamMatchData { IsHome = true, Scored = match.HomeGoals, Conceded = match.AwayGoals });
-            teamMatches[match.AwayTeam].Add(new TeamMatchData { IsHome = false, Scored = match.AwayGoals, Conceded = match.HomeGoals });
+            if (!shotsOnTarget.HasValue) return goals;
+            return (goals * 0.5) + (shotsOnTarget.Value * goalsPerShot * 0.5);
         }
 
-        var result = new List<Team>();
+        // 2. Beräkna ligans hemma- och bortasnitt (ger oss den faktiska hemmafördelen)
+        double leagueHomeAvg = matches.Average(m => GetEffectiveGoals(m.HomeGoals, m.HomeShotsOnTarget));
+        double leagueAwayAvg = matches.Average(m => GetEffectiveGoals(m.AwayGoals, m.AwayShotsOnTarget));
 
-        // ==========================================
-        // ⚙️ KONFIGURATION FÖR VIKTNING (TIDSFAKTOR)
-        // ==========================================
-        int recentMatchesCount = 5;  // Antal matcher som ska räknas som "Nylig form"
-        double recentWeight = 2.5;   // De 5 senaste matcherna väger 2.5x tyngre
-        double normalWeight = 1.0;   // Resterande matcher i början av säsongen
+        // Hitta alla unika lag
+        var teamNames = matches.Select(m => m.HomeTeam)
+                               .Concat(matches.Select(m => m.AwayTeam))
+                               .Distinct()
+                               .ToList();
 
-        foreach (var kvp in teamMatches)
+        // Startvärden: Alla lag börjar som exakt medelbra (1.0)
+        var attack = teamNames.ToDictionary(t => t, _ => 1.0);
+        var defense = teamNames.ToDictionary(t => t, _ => 1.0);
+
+        // 3. Iterativ motståndarjustering (15 rundor räcker för att värdena ska stabiliseras)
+        for (int iter = 0; iter < 15; iter++)
         {
-            string teamName = kvp.Key;
-            var allMatches = kvp.Value;
-            int totalMatches = allMatches.Count;
+            var newAttack = new Dictionary<string, double>();
+            var newDefense = new Dictionary<string, double>();
 
-            double homeScoredWeighted = 0, homeConcededWeighted = 0, homeWeightSum = 0;
-            double awayScoredWeighted = 0, awayConcededWeighted = 0, awayWeightSum = 0;
-
-            int homeCount = 0, awayCount = 0;
-
-            // 2. Loopa över lagets matcher från äldst till nyast
-            for (int i = 0; i < totalMatches; i++)
+            foreach (var team in teamNames)
             {
-                var m = allMatches[i];
+                double scoredActual = 0;
+                double scoredExpected = 0;
+                double concededActual = 0;
+                double concededExpected = 0;
 
-                // Om matchen är inom de sista 'recentMatchesCount' i listan
-                bool isRecent = i >= (totalMatches - recentMatchesCount);
-                double weight = isRecent ? recentWeight : normalWeight;
+                foreach (var m in matches)
+                {
+                    if (m.HomeTeam == team)
+                    {
+                        scoredActual += GetEffectiveGoals(m.HomeGoals, m.HomeShotsOnTarget);
+                        scoredExpected += leagueHomeAvg * defense[m.AwayTeam];
 
-                if (m.IsHome)
-                {
-                    homeScoredWeighted += m.Scored * weight;
-                    homeConcededWeighted += m.Conceded * weight;
-                    homeWeightSum += weight;
-                    homeCount++;
+                        concededActual += GetEffectiveGoals(m.AwayGoals, m.AwayShotsOnTarget);
+                        concededExpected += leagueAwayAvg * attack[m.AwayTeam];
+                    }
+                    else if (m.AwayTeam == team)
+                    {
+                        scoredActual += GetEffectiveGoals(m.AwayGoals, m.AwayShotsOnTarget);
+                        scoredExpected += leagueAwayAvg * defense[m.HomeTeam];
+
+                        concededActual += GetEffectiveGoals(m.HomeGoals, m.HomeShotsOnTarget);
+                        concededExpected += leagueHomeAvg * attack[m.HomeTeam];
+                    }
                 }
-                else
-                {
-                    awayScoredWeighted += m.Scored * weight;
-                    awayConcededWeighted += m.Conceded * weight;
-                    awayWeightSum += weight;
-                    awayCount++;
-                }
+
+                newAttack[team] = scoredExpected > 0 ? scoredActual / scoredExpected : 1.0;
+                newDefense[team] = concededExpected > 0 ? concededActual / concededExpected : 1.0;
             }
 
-            // 3. Räkna ut det viktade snittet
-            result.Add(new Team(
-                Name: teamName,
-                HomeGoalsScoredAvg: homeWeightSum > 0 ? homeScoredWeighted / homeWeightSum : 0,
-                HomeGoalsConcededAvg: homeWeightSum > 0 ? homeConcededWeighted / homeWeightSum : 0,
-                AwayGoalsScoredAvg: awayWeightSum > 0 ? awayScoredWeighted / awayWeightSum : 0,
-                AwayGoalsConcededAvg: awayWeightSum > 0 ? awayConcededWeighted / awayWeightSum : 0,
-                MatchesPlayedHome: homeCount,
-                MatchesPlayedAway: awayCount
-            ));
+            // Normalisera så att ligans snitt alltid förblir exakt 1.0 (hindrar värdena från att glida iväg)
+            double avgAtk = newAttack.Values.Average();
+            double avgDef = newDefense.Values.Average();
+
+            foreach (var team in teamNames)
+            {
+                attack[team] = newAttack[team] / avgAtk;
+                defense[team] = newDefense[team] / avgDef;
+            }
         }
 
-        return result;
+        return teamNames.Select(name => new Team(
+        name,
+        attack[name] * leagueHomeAvg,
+        defense[name] * leagueAwayAvg,
+        attack[name] * leagueAwayAvg,
+        defense[name] * leagueHomeAvg,
+        matches.Count(m => m.HomeTeam == name),
+        matches.Count(m => m.AwayTeam == name)
+    )).ToList();
     }
 
     // Intern hjälpklass för att hålla datan

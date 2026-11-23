@@ -12,5 +12,7 @@ public partial record FootballDataMatch(
     [CsvColumn("FTAG")] int AwayGoals,
     [CsvColumn("B365H")] double? OddsHome,
     [CsvColumn("B365D")] double? OddsDraw,
-    [CsvColumn("B365A")] double? OddsAway
+    [CsvColumn("B365A")] double? OddsAway,
+    [CsvColumn("HST")] int? HomeShotsOnTarget = null,
+    [CsvColumn("AST")] int? AwayShotsOnTarget = null
 );

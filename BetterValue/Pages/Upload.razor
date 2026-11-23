@@ -346,20 +346,31 @@
                 <div class="card-body bg-light">
                     @foreach (var row in scannerRows)
                     {
+                        var rowTeams = teamsbyLeague.TryGetValue(row.League, out var list) ? list : new List<Team>();
+
                         <div class="row g-2 align-items-center mb-2">
-                            <div class="col-md-3">
+                            <div class="col-md-2">
+                                <select class="form-select form-select-sm fw-bold" value="@row.League" @onchange="(e) => OnScannerLeagueChanged(row, e)">
+                                    <option value="">-- Liga --</option>
+                                    @foreach (var league in availableLeagues)
+                                    {
+                                        <option value="@league">@league</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-2">
                                 <select class="form-select form-select-sm" @bind="row.HomeTeam">
                                     <option value="">-- Hemmalag --</option>
-                                    @foreach (var t in teams.OrderBy(t => t.Name))
+                                    @foreach (var t in rowTeams.OrderBy(t => t.Name))
                                     {
                                         <option value="@t.Name">@t.Name</option>
                                     }
                                 </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-2">
                                 <select class="form-select form-select-sm" @bind="row.AwayTeam">
                                     <option value="">-- Bortalag --</option>
-                                    @foreach (var t in teams.OrderBy(t => t.Name))
+                                    @foreach (var t in rowTeams.OrderBy(t => t.Name))
                                     {
                                         <option value="@t.Name">@t.Name</option>
                                     }
@@ -424,10 +435,11 @@
 
 @code {
 
-   
+
 
 
     private string activeTab = "overview";
+    private Dictionary<string, List<Team>> teamsbyLeague = new();
 
     // Variabler för dynamisk ligaväljare
     private List<FootballDataMatch> allMatches = new();
@@ -463,6 +475,7 @@
         for (int i = 0; i < 3; i++) AddScannerRow();
     }
 
+
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
         isLoading = true;
@@ -471,6 +484,8 @@
         availableLeagues.Clear();
         calcResult = null;
         scannedResults.Clear();
+        teamsbyLeague.Clear();
+        scannerRows.Clear();
 
         try
         {
@@ -490,6 +505,14 @@
                                          .OrderBy(d => d)
                                          .ToList();
 
+
+            foreach (var league in availableLeagues)
+            {
+                var leagueMatches = allMatches.Where(m => m.Division == league).ToList();
+                var leagueTeams = StatsAggregator.CalculateTeamStatistics(leagueMatches).ToList();
+                teamsbyLeague[league] = leagueTeams;
+            }
+
             if (availableLeagues.Any())
             {
                 selectedLeague = availableLeagues.First();
@@ -503,7 +526,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged(); // <-- LÄGG TILL DENNA RAD! Den tvingar menyn att synas.
+            StateHasChanged(); 
         }
     }
 
@@ -516,39 +539,62 @@
     private void ApplyLeagueFilter()
     {
         matches = allMatches.Where(m => m.Division == selectedLeague).ToList();
-        teams = StatsAggregator.CalculateTeamStatistics(matches).ToList();
+        teams = teamsbyLeague.TryGetValue(selectedLeague, out var leagueTeams) ? leagueTeams : new();
 
         selectedHomeTeam = "";
         selectedAwayTeam = "";
         calcResult = null;
-
-        scannerRows.Clear();
-        for (int i = 0; i < 3; i++) AddScannerRow();
-        scannedResults.Clear();
     }
 
     private void CalculateMatch()
     {
         var home = teams.FirstOrDefault(t => t.Name == selectedHomeTeam);
         var away = teams.FirstOrDefault(t => t.Name == selectedAwayTeam);
-        if (home != null && away != null) calcResult = PoissonService.CalculateProbabilities(home, away);
+
+        if (home != null && away != null)
+        {
+            double avgHome = teams.Average(t => t.HomeGoalsScoredAvg);
+            double avgAway = teams.Average(t => t.AwayGoalsScoredAvg);
+            calcResult = PoissonService.CalculateProbabilities(home, away, avgHome, avgAway);
+        }
     }
 
     // --- SKANNER LOGIK ---
-    private void AddScannerRow() => scannerRows.Add(new ScannerRow());
+    private void AddScannerRow()
+    {
+        // Förifyll med senast valda liga (eller den översta ligaväljaren) för snabbare inmatning
+        var defaultLeague = scannerRows.LastOrDefault()?.League ?? selectedLeague;
+        scannerRows.Add(new ScannerRow { League = defaultLeague });
+    }
     private void RemoveScannerRow(ScannerRow row) => scannerRows.Remove(row);
+
+    private void OnScannerLeagueChanged(ScannerRow row, ChangeEventArgs e)
+    {
+        row.League = e.Value?.ToString() ?? "";
+        row.HomeTeam = "";
+        row.AwayTeam = "";
+    }
 
     private void RunScanner()
     {
         scannedResults.Clear();
         foreach (var row in scannerRows)
         {
-            if (string.IsNullOrEmpty(row.HomeTeam) || string.IsNullOrEmpty(row.AwayTeam)) continue;
-            var home = teams.FirstOrDefault(t => t.Name == row.HomeTeam);
-            var away = teams.FirstOrDefault(t => t.Name == row.AwayTeam);
+            if (string.IsNullOrEmpty(row.League) || string.IsNullOrEmpty(row.HomeTeam) || string.IsNullOrEmpty(row.AwayTeam))
+                continue;
+
+            if (!teamsbyLeague.TryGetValue(row.League, out var leagueTeams) || !leagueTeams.Any())
+                continue;
+
+            var home = leagueTeams.FirstOrDefault(t => t.Name == row.HomeTeam);
+            var away = leagueTeams.FirstOrDefault(t => t.Name == row.AwayTeam);
+
             if (home != null && away != null)
             {
-                var probs = PoissonService.CalculateProbabilities(home, away);
+                double avgHome = leagueTeams.Average(t => t.HomeGoalsScoredAvg);
+                double avgAway = leagueTeams.Average(t => t.AwayGoalsScoredAvg);
+                var probs = PoissonService.CalculateProbabilities(home, away, avgHome, avgAway);
+
                 double ev1 = (probs.HomeWin * row.Odds1) - 1;
                 double evX = (probs.Draw * row.OddsX) - 1;
                 double ev2 = (probs.AwayWin * row.Odds2) - 1;
@@ -567,6 +613,7 @@
 
     private class ScannerRow
     {
+        public string League { get; set; } = "";
         public string HomeTeam { get; set; } = "";
         public string AwayTeam { get; set; } = "";
         public double Odds1 { get; set; } = 2.00;

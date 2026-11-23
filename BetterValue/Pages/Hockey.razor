@@ -7,45 +7,75 @@
 <PageTitle>OddsAnalytics - Hockey</PageTitle>
 
 <div class="container py-4">
-    <h2 class="mb-4 fw-bold">🏒 Hockey-Skanner (Poisson)</h2>
+    <h2 class="mb-4 fw-bold">🏒 Hockey-Skanner (Poisson + Special Teams)</h2>
 
     <div class="upload-zone-premium p-5 mb-5 text-center">
-        <h5 class="mb-3 text-primary fw-bold">Läs in Hockey-data (MoneyPuck CSV)</h5>
+        <h5 class="mb-3 text-primary fw-bold">Läs in Hockey-data (MoneyPuck teams.csv)</h5>
         <InputFile OnChange="@HandleFileSelected" accept=".csv" class="form-control w-50 mx-auto shadow-sm" />
     </div>
 
     @if (isLoading)
     {
-        <div class="alert alert-info shadow-sm">Beräknar xG och formkurvor för isen...</div>
+        <div class="alert alert-info shadow-sm">Beräknar 5v5, Special Teams och ligasnitt...</div>
     }
 
     @if (teams != null && teams.Any())
     {
         <div class="alert alert-success shadow-sm fw-bold">
-            ✅ Laddade in @teams.Count lag från databasen! Redo för kalkyl.
+            ✅ Laddade in @teams.Count lag!
+            @if (leagueAverages != null)
+            {
+                <span class="ms-2 fw-normal">
+                    (Ligasnitt: @leagueAverages.AllAvg.ToString("F2") mål/lag
+                    @(leagueAverages.EsAvg > 0 ? $" • 5v5 + PP/PK aktivt" : " • Total-läge"))
+                </span>
+            }
         </div>
 
         <!-- ENKLA KALKYLATORN -->
-        <div class="row mb-4">
-            <div class="col-md-6">
+        <div class="row mb-3">
+            <div class="col-md-6 mb-3">
                 <label class="form-label fw-bold">Hemmalag:</label>
-                <select class="form-select shadow-sm" @bind="selectedHomeTeam">
+                <select class="form-select shadow-sm mb-2" @bind="selectedHomeTeam">
                     <option value="">-- Välj hemmalag --</option>
                     @foreach (var t in teams.OrderBy(x => x.team))
                     {
                         <option value="@t.team">@t.team</option>
                     }
                 </select>
+                <div class="d-flex gap-3 align-items-center">
+                    <select class="form-select form-select-sm w-auto" @bind="homeGoalieFactor">
+                        <option value="0.93">Målvakt: Topp / 1:a (-7%)</option>
+                        <option value="1.0">Målvakt: Normal (0%)</option>
+                        <option value="1.10">Målvakt: Backup (+10%)</option>
+                    </select>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="homeB2B" @bind="homeBackToBack" />
+                        <label class="form-check-label small fw-semibold" for="homeB2B">Spelade igår (B2B)</label>
+                    </div>
+                </div>
             </div>
-            <div class="col-md-6">
+
+            <div class="col-md-6 mb-3">
                 <label class="form-label fw-bold">Bortalag:</label>
-                <select class="form-select shadow-sm" @bind="selectedAwayTeam">
+                <select class="form-select shadow-sm mb-2" @bind="selectedAwayTeam">
                     <option value="">-- Välj bortalag --</option>
                     @foreach (var t in teams.OrderBy(x => x.team))
                     {
                         <option value="@t.team">@t.team</option>
                     }
                 </select>
+                <div class="d-flex gap-3 align-items-center">
+                    <select class="form-select form-select-sm w-auto" @bind="awayGoalieFactor">
+                        <option value="0.93">Målvakt: Topp / 1:a (-7%)</option>
+                        <option value="1.0">Målvakt: Normal (0%)</option>
+                        <option value="1.10">Målvakt: Backup (+10%)</option>
+                    </select>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="awayB2B" @bind="awayBackToBack" />
+                        <label class="form-check-label small fw-semibold" for="awayB2B">Spelade igår (B2B)</label>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -53,24 +83,48 @@
 
         @if (calcResult != null)
         {
+            <div class="text-center mb-3 fs-5">
+                Simulerat xG:
+                <strong class="text-primary">@calcResult.ExpectedHomeGoals.ToString("F2")</strong>
+                –
+                <strong class="text-primary">@calcResult.ExpectedAwayGoals.ToString("F2")</strong>
+                <span class="text-muted fs-6 ms-2">(Totalt @((calcResult.ExpectedHomeGoals + calcResult.ExpectedAwayGoals).ToString("F2")) mål)</span>
+            </div>
+
             <div class="row mt-2">
-                <div class="col-md-6 mb-3">
-                    <div class="premium-card">
+                <div class="col-md-4 mb-3">
+                    <div class="premium-card h-100">
                         <div class="premium-card-header-blue fw-bold fs-5">Moneyline (Inkl. OT)</div>
                         <div class="card-body text-center p-4">
-                            <h5 class="mb-3 fw-bold">@selectedHomeTeam vs @selectedAwayTeam</h5>
-                            <p class="fs-5">1: <strong>@((calcResult.HomeMoneyline * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.HomeMoneyline).ToString("F2")))</p>
-                            <p class="fs-5">2: <strong>@((calcResult.AwayMoneyline * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.AwayMoneyline).ToString("F2")))</p>
+                            <p class="fs-5 mb-2">1: <strong>@((calcResult.HomeMoneyline * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.HomeMoneyline))</p>
+                            <p class="fs-5 mb-2">2: <strong>@((calcResult.AwayMoneyline * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.AwayMoneyline))</p>
+                            <hr />
+                            <small class="text-muted">
+                                60 min (1X2): @((calcResult.HomeWinReg * 100).ToString("F1"))% / @((calcResult.DrawReg * 100).ToString("F1"))% / @((calcResult.AwayWinReg * 100).ToString("F1"))%
+                            </small>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-6 mb-3">
-                    <div class="premium-card">
-                        <div class="premium-card-header-green fw-bold fs-5">Målmarknad (Ö/U 5.5)</div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="premium-card h-100">
+                        <div class="premium-card-header-green fw-bold fs-5">Målmarknad (Inkl. OT)</div>
                         <div class="card-body text-center p-4">
-                            <h5 class="mb-3 fw-bold">Standardlinje</h5>
-                            <p class="fs-5">Över 5.5: <strong>@((calcResult.Over55 * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.Over55).ToString("F2")))</p>
-                            <p class="fs-5">Under 5.5: <strong>@((calcResult.Under55 * 100).ToString("F1"))%</strong> (Odds: @((1 / calcResult.Under55).ToString("F2")))</p>
+                            <p class="fs-6 mb-1">Över 5.5: <strong>@((calcResult.Over55 * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.Over55))</p>
+                            <p class="fs-6 mb-3">Under 5.5: <strong>@((calcResult.Under55 * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.Under55))</p>
+                            <hr />
+                            <p class="fs-6 mb-1">Över 6.5: <strong>@((calcResult.Over65 * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.Over65))</p>
+                            <p class="fs-6 mb-0">Under 6.5: <strong>@((calcResult.Under65 * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.Under65))</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="premium-card h-100">
+                        <div class="premium-card-header-blue fw-bold fs-5">Puckline (-1.5)</div>
+                        <div class="card-body text-center p-4">
+                            <p class="fs-5 mb-2">@selectedHomeTeam -1.5:<br /><strong>@((calcResult.HomePucklineMinus15 * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.HomePucklineMinus15))</p>
+                            <p class="fs-5 mb-0">@selectedAwayTeam -1.5:<br /><strong>@((calcResult.AwayPucklineMinus15 * 100).ToString("F1"))%</strong> (@FormatFairOdds(calcResult.AwayPucklineMinus15))</p>
                         </div>
                     </div>
                 </div>
@@ -89,8 +143,9 @@
                         <th>Bortalag</th>
                         <th>Odds 1 (ML)</th>
                         <th>Odds 2 (ML)</th>
-                        <th>Odds Ö 5.5</th>
-                        <th>Odds U 5.5</th>
+                        <th>Mållina</th>
+                        <th>Odds Över</th>
+                        <th>Odds Under</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -118,8 +173,14 @@
                             </td>
                             <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.Odds1" /></td>
                             <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.Odds2" /></td>
-                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.OddsO55" /></td>
-                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.OddsU55" /></td>
+                            <td>
+                                <select class="form-select form-select-sm shadow-sm" @bind="row.GoalLine">
+                                    <option value="5.5">5.5</option>
+                                    <option value="6.5">6.5</option>
+                                </select>
+                            </td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.OddsOver" /></td>
+                            <td><input type="number" step="0.01" class="form-control form-control-sm shadow-sm" @bind="row.OddsUnder" /></td>
                             <td>
                                 <button class="btn btn-sm btn-outline-danger fw-bold shadow-sm" @onclick="() => RemoveScannerRow(row)">X</button>
                             </td>
@@ -142,6 +203,7 @@
                     <thead class="bg-success text-white">
                         <tr>
                             <th>Match</th>
+                            <th>Sim. xG</th>
                             <th>Speltips</th>
                             <th>Din Chans</th>
                             <th>Spelbolagets Odds</th>
@@ -153,6 +215,7 @@
                         {
                             <tr>
                                 <td class="fw-bold">@res.Match</td>
+                                <td class="text-muted">@res.ExpectedGoals</td>
                                 <td><span class="badge bg-primary fs-6 shadow-sm">@res.Pick</span></td>
                                 <td>@((res.Prob * 100).ToString("F1"))%</td>
                                 <td>@res.Odds.ToString("F2")</td>
@@ -167,13 +230,16 @@
 </div>
 
 @code {
-
-   
     private bool isLoading;
     private List<HockeyDataMatch> teams = new();
+    private HockeyLeagueAverages? leagueAverages;
 
     private string selectedHomeTeam = "";
     private string selectedAwayTeam = "";
+    private double homeGoalieFactor = 1.0;
+    private double awayGoalieFactor = 1.0;
+    private bool homeBackToBack = false;
+    private bool awayBackToBack = false;
     private HockeyMatchProbabilities? calcResult;
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
@@ -182,7 +248,12 @@
         try
         {
             var file = e.File;
-            if (file != null) teams = (await HockeyCsvParser.ParseTeamsAsync(file)).ToList();
+            if (file != null)
+            {
+                teams = (await HockeyCsvParser.ParseTeamsAsync(file)).ToList();
+                leagueAverages = PoissonService.CalculateLeagueAverages(teams);
+                calcResult = null;
+            }
         }
         finally { isLoading = false; }
     }
@@ -191,8 +262,16 @@
     {
         var home = teams.FirstOrDefault(t => t.team == selectedHomeTeam);
         var away = teams.FirstOrDefault(t => t.team == selectedAwayTeam);
-        if (home != null && away != null) calcResult = PoissonService.CalculateProbabilities(home, away);
+        if (home != null && away != null)
+        {
+            calcResult = PoissonService.CalculateProbabilities(
+                home, away, leagueAverages,
+                homeGoalieFactor, awayGoalieFactor,
+                homeBackToBack, awayBackToBack);
+        }
     }
+
+    private static string FormatFairOdds(double prob) => prob > 0.001 ? (1.0 / prob).ToString("F2") : "-";
 
     private List<HockeyScannerRow> scannerRows = new();
     private List<HockeyScannerResult> scannedResults = new();
@@ -217,18 +296,34 @@
 
             if (home != null && away != null)
             {
-                var probs = PoissonService.CalculateProbabilities(home, away);
+                var probs = PoissonService.CalculateProbabilities(home, away, leagueAverages);
                 string matchName = $"{home.team} - {away.team}";
+                string xgText = $"{probs.ExpectedHomeGoals:F2} - {probs.ExpectedAwayGoals:F2}";
 
-                double ev1 = (probs.HomeMoneyline * row.Odds1) - 1;
-                double ev2 = (probs.AwayMoneyline * row.Odds2) - 1;
-                double evO = (probs.Over55 * row.OddsO55) - 1;
-                double evU = (probs.Under55 * row.OddsU55) - 1;
+                bool is65 = row.GoalLine == "6.5";
+                double overProb = is65 ? probs.Over65 : probs.Over55;
+                double underProb = is65 ? probs.Under65 : probs.Under55;
 
-                if (ev1 > 0) scannedResults.Add(new HockeyScannerResult(matchName, "1 (ML)", ev1, probs.HomeMoneyline, row.Odds1));
-                if (ev2 > 0) scannedResults.Add(new HockeyScannerResult(matchName, "2 (ML)", ev2, probs.AwayMoneyline, row.Odds2));
-                if (evO > 0) scannedResults.Add(new HockeyScannerResult(matchName, "Över 5.5", evO, probs.Over55, row.OddsO55));
-                if (evU > 0) scannedResults.Add(new HockeyScannerResult(matchName, "Under 5.5", evU, probs.Under55, row.OddsU55));
+                if (row.Odds1 > 1.0)
+                {
+                    double ev1 = (probs.HomeMoneyline * row.Odds1) - 1;
+                    if (ev1 > 0) scannedResults.Add(new HockeyScannerResult(matchName, xgText, "1 (ML)", ev1, probs.HomeMoneyline, row.Odds1));
+                }
+                if (row.Odds2 > 1.0)
+                {
+                    double ev2 = (probs.AwayMoneyline * row.Odds2) - 1;
+                    if (ev2 > 0) scannedResults.Add(new HockeyScannerResult(matchName, xgText, "2 (ML)", ev2, probs.AwayMoneyline, row.Odds2));
+                }
+                if (row.OddsOver > 1.0)
+                {
+                    double evO = (overProb * row.OddsOver) - 1;
+                    if (evO > 0) scannedResults.Add(new HockeyScannerResult(matchName, xgText, $"Över {row.GoalLine}", evO, overProb, row.OddsOver));
+                }
+                if (row.OddsUnder > 1.0)
+                {
+                    double evU = (underProb * row.OddsUnder) - 1;
+                    if (evU > 0) scannedResults.Add(new HockeyScannerResult(matchName, xgText, $"Under {row.GoalLine}", evU, underProb, row.OddsUnder));
+                }
             }
         }
         scannedResults = scannedResults.OrderByDescending(r => r.EV).ToList();
@@ -238,11 +333,12 @@
     {
         public string HomeTeam { get; set; } = "";
         public string AwayTeam { get; set; } = "";
-        public double Odds1 { get; set; } = 2.00;
-        public double Odds2 { get; set; } = 2.00;
-        public double OddsO55 { get; set; } = 1.90;
-        public double OddsU55 { get; set; } = 1.90;
+        public double Odds1 { get; set; } = 0;
+        public double Odds2 { get; set; } = 0;
+        public string GoalLine { get; set; } = "5.5";
+        public double OddsOver { get; set; } = 0;
+        public double OddsUnder { get; set; } = 0;
     }
 
-    private record HockeyScannerResult(string Match, string Pick, double EV, double Prob, double Odds);
+    private record HockeyScannerResult(string Match, string ExpectedGoals, string Pick, double EV, double Prob, double Odds);
 }

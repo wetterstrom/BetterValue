@@ -4,7 +4,11 @@ namespace BetterValue.Service;
 
 public interface IPoissonService
 {
-    MatchProbabilities CalculateProbabilities(Team homeTeam, Team awayTeam);
+    MatchProbabilities CalculateProbabilities(
+        Team homeTeam,
+        Team awayTeam,
+        double leagueHomeAvg = 1.55,
+        double leagueAwayAvg = 1.25);
 }
 
 public record MatchProbabilities(
@@ -34,29 +38,30 @@ public class PoissonService : IPoissonService
         return result;
     }
 
-    public MatchProbabilities CalculateProbabilities(Team homeTeam, Team awayTeam)
+    public MatchProbabilities CalculateProbabilities(
+        Team homeTeam,
+        Team awayTeam,
+        double leagueHomeAvg = 1.55,
+        double leagueAwayAvg = 1.25)
     {
-        double homeXg = (homeTeam.HomeGoalsScoredAvg + awayTeam.AwayGoalsConcededAvg) / 2.0;
-        double awayXg = (awayTeam.AwayGoalsScoredAvg + homeTeam.HomeGoalsConcededAvg) / 2.0;
+        // Multiplikativ Poisson (hemmafördelen finns redan inbakad i lagens Hemma/Borta-värden)
+        double homeXg = (homeTeam.HomeGoalsScoredAvg * awayTeam.AwayGoalsConcededAvg) / leagueHomeAvg;
+        double awayXg = (awayTeam.AwayGoalsScoredAvg * homeTeam.HomeGoalsConcededAvg) / leagueAwayAvg;
 
-        // Hemmaplansfördel
-        double homeAdvantageMultiplier = 1.10;
-        double awayDisadvantageMultiplier = 0.95;
-
-        homeXg = homeXg * homeAdvantageMultiplier;
-        awayXg = awayXg * awayDisadvantageMultiplier;
+        // Skydd mot orimligt låga värden om ett lag ännu inte släppt in mål
+        homeXg = Math.Max(0.15, homeXg);
+        awayXg = Math.Max(0.15, awayXg);
 
         double homeWinProb = 0;
         double drawProb = 0;
         double awayWinProb = 0;
 
-        // Nya variabler för målmarknaden
         double over25Prob = 0, under25Prob = 0;
         double over35Prob = 0, under35Prob = 0;
 
-        for (int homeGoals = 0; homeGoals <= 6; homeGoals++)
+        for (int homeGoals = 0; homeGoals <= 10; homeGoals++)
         {
-            for (int awayGoals = 0; awayGoals <= 6; awayGoals++)
+            for (int awayGoals = 0; awayGoals <= 10; awayGoals++)
             {
                 double matchScoreProb = CalculatePoisson(homeGoals, homeXg) * CalculatePoisson(awayGoals, awayXg);
                 int totalGoals = homeGoals + awayGoals;
